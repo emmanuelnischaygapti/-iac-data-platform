@@ -1,0 +1,73 @@
+name: Terraform CI
+
+# Trigger: runs on every pull request targeting main.
+# Purpose: validate and preview changes — NO actual deployment.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "terraform/**"
+      - ".github/workflows/**"
+
+permissions:
+  id-token: write   # required for OIDC authentication to AWS
+  contents: read
+  pull-requests: write  # required to post plan output as PR comment
+
+jobs:
+  terraform-plan:
+    name: Format → Validate → Plan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC — no long-lived keys)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.0"
+
+      - name: terraform init
+        working-directory: terraform
+        run: terraform init
+
+      - name: terraform fmt --check
+        working-directory: terraform
+        run: terraform fmt -check -recursive
+        # Fails if any .tf file isn't properly formatted.
+        # Run `terraform fmt` locally to auto-fix before pushing.
+
+      - name: terraform validate
+        working-directory: terraform
+        run: terraform validate
+
+      - name: terraform plan
+        id: plan
+        working-directory: terraform
+        run: |
+          terraform plan -var="alert_email=${{ secrets.ALERT_EMAIL }}" \
+            -no-color -out=tfplan 2>&1 | tee plan_output.txt
+        continue-on-error: true  # capture output even if plan has warnings
+
+      - name: Post plan output as PR comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('terraform/plan_output.txt', 'utf8');
+            const truncated = plan.length > 60000
+              ? plan.substring(0, 60000) + '\n\n... (truncated)'
+              : plan;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## Terraform Plan\n\`\`\`hcl\n${truncated}\n\`\`\``
+            });

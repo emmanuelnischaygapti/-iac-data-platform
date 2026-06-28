@@ -1,0 +1,17 @@
+# Terraform state — never commit; use remote state in S3
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+.terraform/
+.terraform.lock.hcl
+
+# Variable files with real values — use .example templates in git
+terraform.tfvars
+
+# Lambda build artifact
+lambda/etl_transform.zip
+lambda/__pycache__/
+
+# OS noise
+.DS_Store
+Thumbs.db
